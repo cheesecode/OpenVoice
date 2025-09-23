@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(timeout:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "mcp__serena__write_memory",
+      "mcp__serena__find_file",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(TASKKILL /F /PID 33052)",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "ask": []

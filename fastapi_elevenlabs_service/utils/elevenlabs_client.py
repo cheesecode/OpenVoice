@@ -40,13 +40,41 @@ class ElevenLabsClient:
             raise Exception(f"ElevenLabs API error: {e}")
 
     def get_custom_voices(self) -> List[Dict[str, Any]]:
-        """Get all non-premade voices"""
+        """Get all non-premade voices, prioritizing cloned voices for deletion"""
         all_voices = self.list_voices()
-        # Be very aggressive - include anything that's not explicitly premade
+        
+        # Filter out premade voices
         custom_voices = [
             voice for voice in all_voices
             if voice.get('category') != 'premade'
         ]
+        
+        # Sort by priority for deletion:
+        # 1. Cloned voices first (easier to delete)
+        # 2. Then by creation date (oldest first) if available
+        def sort_key(voice):
+            category = voice.get('category', '')
+            # Prioritize cloned voices for deletion
+            category_priority = 0 if category == 'cloned' else 1
+            
+            # Try to use date for secondary sorting, fallback to voice_id if no date
+            date_str = voice.get('date_unix', voice.get('created_at', '0'))
+            try:
+                if isinstance(date_str, (int, float)):
+                    date_value = int(date_str)
+                elif isinstance(date_str, str) and date_str.isdigit():
+                    date_value = int(date_str)
+                else:
+                    # Fallback to voice_id for consistent ordering
+                    date_value = hash(voice.get('voice_id', '')) % 1000000
+            except:
+                date_value = hash(voice.get('voice_id', '')) % 1000000
+                
+            return (category_priority, date_value)
+        
+        custom_voices.sort(key=sort_key)
+        logger.info(f"Found {len(custom_voices)} custom voices (sorted by deletion priority)")
+        
         return custom_voices
 
     def delete_voice(self, voice_id: str) -> bool:
@@ -62,16 +90,36 @@ class ElevenLabsClient:
 
         except requests.RequestException as e:
             logger.error(f"Failed to delete voice {voice_id}: {e}")
+            # Log additional details for debugging
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    logger.error(f"Delete voice API error details: {error_detail}")
+                except:
+                    logger.error(f"Delete voice API response: {e.response.text}")
             return False
 
     def delete_oldest_voice(self) -> bool:
-        """Delete the oldest custom voice"""
+        """Delete the oldest custom voice (prioritizing cloned voices)"""
         custom_voices = self.get_custom_voices()
         if not custom_voices:
+            logger.info("No custom voices found to delete")
             return True  # No voices to delete, consider it success
 
-        oldest_voice = custom_voices[0]
-        return self.delete_voice(oldest_voice['voice_id'])
+        # The list is already sorted with cloned voices first, then by date
+        target_voice = custom_voices[0]
+        voice_name = target_voice.get('name', 'Unknown')
+        voice_category = target_voice.get('category', 'unknown')
+        
+        logger.info(f"Attempting to delete voice: {voice_name} ({target_voice['voice_id']}) - {voice_category}")
+        
+        success = self.delete_voice(target_voice['voice_id'])
+        if success:
+            logger.info(f"Successfully deleted voice: {voice_name}")
+        else:
+            logger.error(f"Failed to delete voice: {voice_name}")
+            
+        return success
 
     def create_voice_clone(self, audio_files: List[str], voice_name: str,
                           description: str = None) -> Optional[str]:
@@ -239,10 +287,10 @@ class ElevenLabsClient:
     
     def ensure_voice_capacity_aggressive(self, target_free_slots: int = 2) -> bool:
         """
-        Ensure voice capacity by deleting enough voices to have free slots
+        Ensure voice capacity by deleting enough voices to have free slots AFTER creating a new voice
         
         Args:
-            target_free_slots: Number of free slots to ensure
+            target_free_slots: Number of free slots to ensure AFTER creating the new voice
             
         Returns:
             True if capacity is available, False if failed
@@ -256,11 +304,14 @@ class ElevenLabsClient:
             
             logger.info(f"Current voice usage: {current_count}/{max_limit}")
             
-            # Calculate how many to delete
-            voices_to_delete = max(0, current_count - (max_limit - target_free_slots))
+            # Calculate how many to delete accounting for the new voice that will be created
+            # We need: current_count + 1 (new voice) + target_free_slots <= max_limit
+            # So: current_count + 1 + target_free_slots <= max_limit
+            # Therefore: voices_to_delete = max(0, current_count + 1 + target_free_slots - max_limit)
+            voices_to_delete = max(0, current_count + 1 + target_free_slots - max_limit)
             
             if voices_to_delete == 0:
-                logger.info(f"Voice capacity is sufficient: {current_count}/{max_limit}")
+                logger.info(f"Voice capacity is sufficient: {current_count}/{max_limit} (will be {current_count + 1} after creation)")
                 return True
                 
             logger.info(f"Need to delete {voices_to_delete} voices to free up capacity")
