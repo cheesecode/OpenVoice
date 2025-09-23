@@ -146,7 +146,8 @@ async def clone_voice(
     notification_email: Optional[str] = None,
     webhook_url: Optional[str] = None,
     stability: float = 0.6,
-    similarity_boost: float = 0.8
+    similarity_boost: float = 0.8,
+    style: float = 0.1
 ):
     """
     Create a personal story in your own voice
@@ -234,7 +235,8 @@ async def clone_voice(
             "notification_email": notification_email,
             "webhook_url": webhook_url,
             "stability": stability,
-            "similarity_boost": similarity_boost
+            "similarity_boost": similarity_boost,
+            "style": style
         }
 
         # Submit job to queue
@@ -527,6 +529,6 @@ if __name__ == "__main__":
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=settings.debug,
+        reload=True,
         log_level=settings.log_level.lower()
     )
